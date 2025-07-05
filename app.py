@@ -5,25 +5,25 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 # --- DATA LOADING AND MODEL CREATION ---
 
-# This function loads the data, creates the TF-IDF matrix, and cosine similarity matrix.
-# The @st.cache_data decorator ensures this expensive computation only runs once.
 @st.cache_data
 def load_and_process_data(csv_path):
     """
-    Loads data, cleans it, and creates the recommendation model components.
-    Returns the DataFrame and the cosine similarity matrix.
+    Loads data, creates a combined text 'soup', and builds the recommendation model.
     """
-    # Load the DataFrame from the CSV file.
     df = pd.read_csv(csv_path)
     
-    # Preprocess the data
-    df['description'] = df['description'].fillna('')
-    
+    # --- THIS IS THE KEY IMPROVEMENT ---
+    # Create a 'soup' of text features to get better recommendations.
+    # We fill any missing values with an empty string first.
+    df['soup'] = df['series_name'].fillna('') + ' ' + \
+                 df['publisher'].fillna('') + ' ' + \
+                 df['description'].fillna('')
+
     # Initialize the TF-IDF Vectorizer
     tfidf = TfidfVectorizer(stop_words='english', ngram_range=(1, 2), min_df=2, max_df=0.7)
     
-    # Create the TF-IDF matrix
-    tfidf_matrix = tfidf.fit_transform(df['description'])
+    # Create the TF-IDF matrix from the new 'soup' column
+    tfidf_matrix = tfidf.fit_transform(df['soup'])
     
     # Calculate the cosine similarity matrix
     cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
@@ -55,14 +55,10 @@ def get_recommendations(title, data, cosine_sim_matrix):
 st.title('📚 Indie Comic Book Recommender')
 st.header('Discover Your Next Favorite Series')
 
-# Load data and build model
 try:
     df, cosine_sim = load_and_process_data('comicvine_comics.csv')
 
-    # Create a list of comic titles for the select box
     comic_titles = df['series_name'].sort_values().tolist()
-
-    # Create a select box for user input
     user_input = st.selectbox('Enter or select a comic book series you like:', options=comic_titles)
 
     if st.button('Get Recommendations'):

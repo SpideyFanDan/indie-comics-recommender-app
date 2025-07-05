@@ -1,80 +1,79 @@
 import streamlit as st
 import pandas as pd
-import pickle
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
-# --- DATA AND MODEL LOADING ---
+# --- DATA LOADING AND MODEL CREATION ---
 
-# Use st.cache_data to load the data and model only once, making the app faster.
+# This function loads the data, creates the TF-IDF matrix, and cosine similarity matrix.
+# The @st.cache_data decorator ensures this expensive computation only runs once.
 @st.cache_data
-def load_model_components():
-    """Load the CSV, TF-IDF vectorizer, and cosine similarity matrix."""
-    try:
-        # --- THIS LINE IS CHANGED ---
-        # Load the DataFrame directly from the CSV file.
-        df = pd.read_csv('comicvine_comics.csv')
-        
-        # Keep loading the other two files with pickle.
-        tfidf_vectorizer = pickle.load(open('tfidf_vectorizer.pkl', 'rb'))
-        cosine_sim = pickle.load(open('cosine_sim.pkl', 'rb'))
-        return df, tfidf_vectorizer, cosine_sim
-    except FileNotFoundError:
-        st.error("Model or data files not found. Please make sure the .pkl and .csv files are in the correct directory.")
-        return None, None, None
-
-# Load the components
-df, tfidf_vectorizer, cosine_sim = load_model_components()
+def load_and_process_data(csv_path):
+    """
+    Loads data, cleans it, and creates the recommendation model components.
+    Returns the DataFrame and the cosine similarity matrix.
+    """
+    # Load the DataFrame from the CSV file.
+    df = pd.read_csv(csv_path)
+    
+    # Preprocess the data
+    df['description'] = df['description'].fillna('')
+    
+    # Initialize the TF-IDF Vectorizer
+    tfidf = TfidfVectorizer(stop_words='english', ngram_range=(1, 2), min_df=2, max_df=0.7)
+    
+    # Create the TF-IDF matrix
+    tfidf_matrix = tfidf.fit_transform(df['description'])
+    
+    # Calculate the cosine similarity matrix
+    cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
+    
+    return df, cosine_sim
 
 # --- RECOMMENDATION FUNCTION ---
 
-# This is the same function we built and tested in the Colab notebook.
-def get_recommendations(title, cosine_sim_matrix, data):
+def get_recommendations(title, data, cosine_sim_matrix):
     """
     This function takes a comic title and returns a list of the 10 most similar comics.
     """
-    # Create a Series of indices and titles for quick lookups
     indices = pd.Series(data.index, index=data['series_name']).drop_duplicates()
     
-    # Get the index of the comic that matches the title
     try:
         idx = indices[title]
     except KeyError:
         return f"Comic titled '{title}' not found in the dataset."
 
-    # Get the pairwise similarity scores
     sim_scores = list(enumerate(cosine_sim_matrix[idx]))
-
-    # Sort the comics based on similarity
     sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-
-    # Get the scores of the 10 most similar comics (excluding itself)
     sim_scores = sim_scores[1:11]
-
-    # Get the comic indices
     comic_indices = [i[0] for i in sim_scores]
+    
+    return data['series_name'].iloc[comic_indices]
 
-    # Return the titles of the top 10 comics
-    recommendations = data['series_name'].iloc[comic_indices]
-    return recommendations
-
-# --- STREAMLIT APP UI ---
+# --- STREAMLIT APP ---
 
 st.title('📚 Indie Comic Book Recommender')
 st.header('Discover Your Next Favorite Series')
 
-# Create a text input box for the user
-user_input = st.text_input('Enter a comic book series you like:', 'Saga')
+# Load data and build model
+try:
+    df, cosine_sim = load_and_process_data('comicvine_comics.csv')
 
-# Create a button to get recommendations
-if st.button('Get Recommendations'):
-    if df is not None:
-        # Get and display recommendations
-        recommendations = get_recommendations(user_input, cosine_sim, df)
+    # Create a list of comic titles for the select box
+    comic_titles = df['series_name'].sort_values().tolist()
+
+    # Create a select box for user input
+    user_input = st.selectbox('Enter or select a comic book series you like:', options=comic_titles)
+
+    if st.button('Get Recommendations'):
+        recommendations = get_recommendations(user_input, df, cosine_sim)
         
         if isinstance(recommendations, str):
-            st.warning(recommendations) # Show a warning if the comic is not found
+            st.warning(recommendations)
         else:
-            st.subheader('Here are some series you might enjoy:')
+            st.subheader(f"Recommendations based on '{user_input}':")
             for title in recommendations:
                 st.write(f"- {title}")
-    else:
-        st.error("Could not load model. Please check the file paths.")
+
+except FileNotFoundError:
+    st.error("`comicvine_comics.csv` not found. Please make sure it's in the same directory as `app.py`.")
